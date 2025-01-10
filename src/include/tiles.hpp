@@ -185,11 +185,11 @@ struct Tile {
 
 struct GridCell {
   int index;
-  bool colapsed;
+  bool collapsed;
   std::unique_ptr<Tile> tile;
   uset<TileType> states;
 
-  GridCell() : index(-1), colapsed(false), tile(nullptr) {
+  GridCell() : index(-1), collapsed(false), tile(nullptr) {
     states = {Wall_BottomLeftCorner,
               Wall_BottomRightCorner,
               Wall_TopLeftCorner,
@@ -201,7 +201,7 @@ struct GridCell {
   }
 
   bool operator==(const GridCell &other) const {
-    return states == other.states && colapsed == other.colapsed;
+    return states == other.states && collapsed == other.collapsed;
   }
 
   void SetTile(std::unique_ptr<Tile> tile) { this->tile = std::move(tile); }
