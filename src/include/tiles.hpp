@@ -147,6 +147,17 @@ const umap<Position, uset<TileType>> FLOORFriends = {
     {BottomLeft, {Floor, Wall_BottomLeftCorner}},
 };
 
+const umap<TileType, umap<Position, uset<TileType>>> TileTypeToFriends = {
+  {Wall_TopRightCorner, WTRCFriends},
+  {Wall_TopLeftCorner, WTLCFriends},
+  {Wall_BottomRightCorner, WBRCFriends},
+  {Wall_BottomLeftCorner, WBLCFriends},
+  {Wall_Horizontal, WHFriends},
+  {Wall_Vertical, WVFriends},
+  {Wall_Void, VOIDFriends},
+  {Floor, FLOORFriends},
+};
+
 struct FriendTiles {
   TileType tileType;
   umap<Position, uset<TileType>> tileTypeFriends;

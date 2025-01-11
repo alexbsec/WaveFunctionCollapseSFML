@@ -1,5 +1,6 @@
 #include "include/tiles.hpp"
 #include <SFML/Graphics/RenderWindow.hpp>
+#include <SFML/System/Sleep.hpp>
 #include <SFML/Window/VideoMode.hpp>
 #include <algorithm>
 #include <cstdlib>
@@ -7,6 +8,8 @@
 #include <iostream>
 #include <iterator>
 #include <numeric>
+#include <queue>
+#include <stdexcept>
 
 const int WINDOW_WIDTH = 1920;
 const int WINDOW_HEIGHT = 1080;
@@ -35,7 +38,6 @@ Iterator RandomElement(Iterator begin, Iterator end) {
 void HandleGrid(vector<GridCell> &grid) {
   vector<size_t> indices(grid.size());
   std::iota(indices.begin(), indices.end(), 0);
-
 
   // Sort so that we know which grid cell has least amount of possible
   // states to be in
@@ -79,7 +81,103 @@ void HandleGrid(vector<GridCell> &grid) {
   }
 }
 
+bool IsFriend(TileType type, Position position, const GridCell &adjCell) {
+  // Checks if the adjacent cell tile is empty
+  // in this case we know that the type is a friend type
+  // independetly of the position
+  if (adjCell.tile == nullptr)
+    return true;
+
+  // From here on, we know for sure the adjacent cell is collapsed
+  // and have its own friends
+  TileType adjType = adjCell.tile->type;
+
+  auto it1 = TileTypeToFriends.find(adjType);
+  if (it1 == TileTypeToFriends.end()) {
+    // This should never throw
+    throw std::runtime_error(
+        "IsFriend: could not find friends for this tile type");
+  }
+
+  const umap<Position, uset<TileType>> &friendsMap = it1->second;
+  auto it2 = friendsMap.find(position);
+  if (it2 == friendsMap.end()) {
+    // this should never throw either
+    throw std::runtime_error(
+        "IsFriend: could not find a friend for this position");
+  }
+
+  const uset<TileType> &friends = it2->second;
+  return friends.find(type) != friends.end();
+}
+
+void Propagate(vector<GridCell> &grid) {
+  std::queue<size_t> propagationQ;
+
+  for (size_t index = 0; index < grid.size(); index++) {
+    if (!grid[index].collapsed) {
+      propagationQ.push(index);
+    }
+  }
+
+  while (!propagationQ.empty()) {
+    size_t index = propagationQ.front();
+    propagationQ.pop();
+
+    int i = index % UNITS;
+    int j = index / UNITS;
+
+    const vector<std::pair<Position, int>> neighbors = {
+        {Position::Top, (j < UNITS - 1 ? i + (j + 1) * UNITS : -1)},
+        {Position::Bottom, (j > 0 ? i + (j - 1) * UNITS : -1)},
+        {Position::Left, (i > 0 ? (i - 1) + j * UNITS : -1)},
+        {Position::Right, (i < UNITS - 1 ? (i + 1) + j * UNITS : -1)},
+    };
+
+    GridCell &cell = grid[index];
+    uset<TileType> updatedStates = cell.states;
+    for (const auto &[position, neighborIndex] : neighbors) {
+      if (neighborIndex == -1)
+        continue; // Skip invalid neighbors
+
+      GridCell &adjCell = grid[neighborIndex];
+
+      uset<TileType> validStates;
+      for (auto &type : updatedStates) {
+        if (IsFriend(type, position, adjCell)) {
+          validStates.insert(type);
+        }
+      }
+
+      if (!validStates.empty())
+        updatedStates = validStates;
+    }
+
+    // If the states were updated, push neighbors back to the queue
+    if (updatedStates != cell.states) {
+      cell.states = updatedStates;
+
+      if (cell.states.size() == 1) {
+        cell.collapsed = true;
+      } else {
+        // It means the states has changed but we can choose freely
+        // from all of them
+        auto pick = RandomElement(cell.states.begin(), cell.states.end());
+        cell.states = uset<TileType>{*pick};
+        cell.collapsed = true;
+      }
+
+      for (const auto &[_, neighborIndex] : neighbors) {
+        if (neighborIndex != -1 && !grid[neighborIndex].collapsed) {
+          propagationQ.push(neighborIndex);
+        }
+      }
+    }
+  }
+}
+
 void Draw(sf::RenderWindow &window, vector<GridCell> &grid) {
+  Propagate(grid);
   for (int j = 0; j < UNITS; j++) {
     for (int i = 0; i < UNITS; i++) {
       GridCell &cell = grid[i + j * UNITS];
@@ -113,7 +211,10 @@ int main() {
     counter++;
   }
 
+  float wait = 2.0f;
+
   HandleGrid(grid);
+  sf::Time time = sf::seconds(wait);
 
   while (window.isOpen()) {
     sf::Event event;
@@ -125,6 +226,7 @@ int main() {
 
     window.clear();
     Draw(window, grid);
+    sf::sleep(time);
     window.display();
   }
   return EXIT_SUCCESS;
