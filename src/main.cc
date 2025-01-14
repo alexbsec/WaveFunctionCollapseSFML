@@ -3,12 +3,13 @@
 #include <SFML/System/Sleep.hpp>
 #include <SFML/Window/VideoMode.hpp>
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <iomanip>
 #include <iostream>
-#include <iterator>
-#include <numeric>
-#include <queue>
+#include <random>
 #include <stdexcept>
 
 const int WINDOW_WIDTH = 1920;
@@ -16,175 +17,303 @@ const int WINDOW_HEIGHT = 1080;
 
 const int PIXEL_SIZE = 16;
 
-const int UNITS = 32;
+const int UNITS = 64;
 const float SCALE_X = (float)WINDOW_WIDTH / (UNITS * PIXEL_SIZE);
 const float SCALE_Y = (float)WINDOW_HEIGHT / (UNITS * PIXEL_SIZE);
 const float SCALE = std::min(SCALE_X, SCALE_Y);
 
-template <typename Iterator>
-Iterator RandomElement(Iterator begin, Iterator end) {
-  const unsigned long n = std::distance(begin, end);
-  const unsigned long divisor = ((long)RAND_MAX + 1) / n;
+size_t HandleGrid(std::vector<GridCell> &grid, bool &cerror) {
+  std::vector<size_t> indices;
 
-  unsigned long k;
-  do {
-    k = rand() / divisor;
-  } while (k >= n);
+  // Filter out collapsed cells and collect indices of uncollapsed cells
+  for (size_t i = 0; i < grid.size(); ++i) {
+    if (!grid[i].collapsed) {
+      indices.push_back(i);
+    }
+  }
 
-  std::advance(begin, k);
-  return begin;
-}
-
-void HandleGrid(vector<GridCell> &grid) {
-  vector<size_t> indices(grid.size());
-  std::iota(indices.begin(), indices.end(), 0);
-
-  // Sort so that we know which grid cell has least amount of possible
-  // states to be in
+  // Sort indices by the number of possible states
   std::sort(indices.begin(), indices.end(), [&grid](size_t a, size_t b) {
-    return grid[a].states.size() < grid[b].states.size();
+    return grid[a].states.Size() < grid[b].states.Size();
   });
 
-  // Since its sorted, we can get a minimum number of states
-  // at index 0
-  size_t len = grid[indices[0]].states.size();
-
-  std::cout << len << std::endl;
+  // Get the minimum number of states
+  size_t minStates = grid[indices[0]].states.Size();
 
   // Find the index where the number of states exceeds the minimum
-  // in the case where we have more than one cell with the minimum len
-  auto it =
-      std::find_if(indices.begin(), indices.end(), [&grid, len](size_t idx) {
-        return grid[idx].states.size() > len;
-      });
+  auto it = std::find_if(indices.begin(), indices.end(),
+                         [&grid, minStates](size_t idx) {
+                           return grid[idx].states.Size() > minStates;
+                         });
 
-  // Determine the stopping index (number of cells with minimum states)
-  // this can be 0
-  size_t stopIndex = std::distance(indices.begin(), it);
-  int random = rand() % (stopIndex);
+  // Shuffle the range of cells with the minimum number of states
+  std::shuffle(indices.begin(), it, std::default_random_engine(rand()));
 
-  // Pick a random index that is within range [0, stopIndex - 1]
-  // and grab that cell on the grid
-  size_t randomPick = indices[random];
+  // Select the first index from the shuffled range
+  size_t randomPick = indices[0];
   GridCell &cell = grid[randomPick];
 
-  // Check if the possible states of this cell is only one
-  // and if so, mark it as collapsed
-  if (cell.states.size() == 1) {
-    cell.collapsed = true;
-  } else {
-    // If there is more than one possible state, it means we need to randomly
-    // pick a state and collapse the cell to it
-    auto pick = RandomElement(cell.states.begin(), cell.states.end());
-    cell.states = uset<TileType>{*pick};
-    cell.collapsed = true;
+  // Check for deadlock
+  if (cell.states.Empty()) {
+    cerror = true;
+    return randomPick;
   }
+
+  // Collapse the cell and mark it as collapsed
+  cell.states.Collapse();
+  cell.collapsed = true;
+
+  return randomPick;
 }
 
-bool IsFriend(TileType type, Position position, const GridCell &adjCell) {
-  // Checks if the adjacent cell tile is empty
-  // in this case we know that the type is a friend type
-  // independetly of the position
-  if (adjCell.tile == nullptr)
-    return true;
-
-  // From here on, we know for sure the adjacent cell is collapsed
-  // and have its own friends
-  TileType adjType = adjCell.tile->type;
-
-  auto it1 = TileTypeToFriends.find(adjType);
-  if (it1 == TileTypeToFriends.end()) {
-    // This should never throw
+std::pair<size_t, size_t> GetIncrement(Position direction) {
+  size_t dx = 0, dy = 0;
+  switch (direction) {
+  case Position::Top:
+    dx = 0;
+    dy = -1;
+    break;
+  case Position::Bottom:
+    dx = 0;
+    dy = 1;
+    break;
+  case Position::Left:
+    dx = -1;
+    dy = 0;
+    break;
+  case Position::Right:
+    dx = 1;
+    dy = 0;
+    break;
+  case Position::TopLeft:
+    dx = -1;
+    dy = -1;
+    break;
+  case Position::TopRight:
+    dx = 1;
+    dy = -1;
+    break;
+  case Position::BottomLeft:
+    dx = -1;
+    dy = 1;
+    break;
+  case Position::BottomRight:
+    dx = 1;
+    dy = 1;
+    break;
+  case Position::Null:
     throw std::runtime_error(
-        "IsFriend: could not find friends for this tile type");
+        "GetIncrement: Position::Null cannot be converted into "
+        "an increment");
   }
 
-  const umap<Position, uset<TileType>> &friendsMap = it1->second;
-  auto it2 = friendsMap.find(position);
-  if (it2 == friendsMap.end()) {
-    // this should never throw either
-    throw std::runtime_error(
-        "IsFriend: could not find a friend for this position");
-  }
-
-  const uset<TileType> &friends = it2->second;
-  return friends.find(type) != friends.end();
+  return std::make_pair(dx, dy);
 }
 
-void Propagate(vector<GridCell> &grid) {
-  std::queue<size_t> propagationQ;
+struct Influences {
+  unsigned int generation;
+  size_t index;
+  umap<size_t, Position> influencedBy;
 
-  for (size_t index = 0; index < grid.size(); index++) {
-    if (!grid[index].collapsed) {
-      propagationQ.push(index);
+  Influences(size_t index) : index(index) {}
+  Influences(unsigned int gen, size_t index, umap<size_t, Position> infl)
+      : generation(gen), index(index), influencedBy(infl) {}
+
+  Position GetOppositePosition(size_t influencingIndex) {
+    if (influencedBy.find(influencingIndex) == influencedBy.end()) {
+      return Position::Null;
+    }
+
+    switch (influencedBy.at(influencingIndex)) {
+    case Position::Top:
+      return Position::Bottom;
+    case Position::Bottom:
+      return Position::Top;
+    case Position::Left:
+      return Position::Right;
+    case Position::Right:
+      return Position::Left;
+    case Position::TopRight:
+      return Position::BottomLeft;
+    case Position::TopLeft:
+      return Position::BottomRight;
+    case Position::BottomRight:
+      return Position::TopLeft;
+    case Position::BottomLeft:
+      return Position::TopRight;
+    default:
+      return Position::Null;
+    }
+  }
+};
+
+void Propagate(vector<GridCell> &grid, size_t collapsedIndex) {
+  std::deque<Influences> generationsQ;
+  uset<size_t> processed;
+  int zerothGen = 0;
+
+  const vector<Position> &positions = {
+      Position::Top,        Position::Bottom,     Position::Left,
+      Position::Right,      Position::TopLeft,    Position::TopRight,
+      Position::BottomLeft, Position::BottomRight};
+
+  int i = collapsedIndex % UNITS;
+  int j = collapsedIndex / UNITS;
+
+  if (!grid[collapsedIndex].collapsed) {
+    std::cerr << "Exiting early because passed collapsedIndex does not refer "
+                 "to a collapsed cell"
+              << std::endl;
+    std::exit(EXIT_FAILURE);
+  }
+
+
+  // Mark the collapsed index as proccesed
+  processed.insert(collapsedIndex);
+  for (const Position &pos : positions) {
+    auto [dx, dy] = GetIncrement(pos);
+    int x = i + dx, y = j + dy;
+    if (x >= 0 && x < UNITS && y >= 0 && y < UNITS) {
+      size_t index = x + y * UNITS;
+      umap<size_t, Position> influencedBy = {{collapsedIndex, pos}};
+      Influences influenced(zerothGen + 1, index, influencedBy);
+      generationsQ.push_back(influenced);
     }
   }
 
-  while (!propagationQ.empty()) {
-    size_t index = propagationQ.front();
-    propagationQ.pop();
+  while (!generationsQ.empty()) {
+    Influences influenced = generationsQ.front();
+    generationsQ.pop_front();
+    processed.insert(influenced.index);
 
-    int i = index % UNITS;
-    int j = index / UNITS;
+    GridCell &influencedCell = grid[influenced.index];
+    if (influencedCell.collapsed) {
+      continue;
+    }
 
-    const vector<std::pair<Position, int>> neighbors = {
-        {Position::Top, (j < UNITS - 1 ? i + (j + 1) * UNITS : -1)},
-        {Position::Bottom, (j > 0 ? i + (j - 1) * UNITS : -1)},
-        {Position::Left, (i > 0 ? (i - 1) + j * UNITS : -1)},
-        {Position::Right, (i < UNITS - 1 ? (i + 1) + j * UNITS : -1)},
-    };
+    umap<TileType, unsigned int> occurrences;
+    for (const auto &[influencingIndex, position] : influenced.influencedBy) {
+      // Gets all possible states for this influencing index
+      States influencingIndexStates = grid[influencingIndex].states;
 
-    GridCell &cell = grid[index];
-    uset<TileType> updatedStates = cell.states;
-    for (const auto &[position, neighborIndex] : neighbors) {
-      if (neighborIndex == -1)
-        continue; // Skip invalid neighbors
-
-      GridCell &adjCell = grid[neighborIndex];
-
-      uset<TileType> validStates;
-      for (auto &type : updatedStates) {
-        if (IsFriend(type, position, adjCell)) {
-          validStates.insert(type);
-        }
+      if (influencingIndexStates.Empty()) {
+        break;
       }
 
-      if (!validStates.empty())
-        updatedStates = validStates;
+
+      if (influencingIndexStates.Size() > 1) {
+        for (const auto &[type, _] : influencingIndexStates.weights) {
+          // Log the current type being processed
+
+          const umap<Position, uset<TileType>> &allFriends =
+              TileTypeToFriends.find(type)->second;
+
+          // Log all positional friends for this type
+
+          const uset<TileType> &positionalFriends =
+              allFriends.find(position)->second;
+
+          // Log the specific friends for the current position
+          for (const TileType &possibleType : positionalFriends) {
+            occurrences[possibleType]++;
+          }
+        }
+      } else if (influencingIndexStates.Size() == 1) {
+        const umap<Position, uset<TileType>> &allFriends =
+            TileTypeToFriends.find(influencingIndexStates.collapsedState)
+                ->second;
+
+
+        const uset<TileType> &positionalFriends =
+            allFriends.find(position)->second;
+
+        // Log the specific friends for the current position
+        for (const TileType &possibleType : positionalFriends) {
+          occurrences[possibleType]++;
+        }
+      }
     }
 
-    // If the states were updated, push neighbors back to the queue
-    if (updatedStates != cell.states) {
-      cell.states = updatedStates;
 
-      if (cell.states.size() == 1) {
-        cell.collapsed = true;
+    // Remove states that are impossible to be in according to the neighbors
+    for (const auto &[type, _] : influencedCell.states.Get()) {
+      if (occurrences.find(type) == occurrences.end()) {
+        influencedCell.states.RemoveState(type);
+      }
+    }
+
+    // Update the weight for the remaining states based on the neighbors'
+    // occurrences
+    for (const auto &[type, occ] : occurrences) {
+      if (influencedCell.states.HasState(type)) {
+        influencedCell.states.Insert(type, static_cast<double>(occ));
+      }
+    }
+
+    // Since we are inserting new values, we must normalize at the end
+    influencedCell.states.Normalize();
+
+    // We must also check if the number of states left is one, and if so,
+    // we collapse the cell
+    if (influencedCell.states.Size() == 1) {
+      influencedCell.states.Collapse();
+      influencedCell.collapsed = true;
+    }
+
+    int i = influenced.index % UNITS;
+    int j = influenced.index / UNITS;
+
+    for (const Position &pos : positions) {
+      // Enqueue neighbors of influenced based on the criteria
+      // of not being processed yet. If it is in the queue, check
+      // which generation it is from
+      auto [dx, dy] = GetIncrement(pos);
+      int x = i + dx, y = j + dy;
+      if (x < 0 || x >= UNITS || y < 0 || y >= UNITS)
+        continue;
+
+      size_t nextIndex = x + y * UNITS;
+      if (processed.find(nextIndex) != processed.end())
+        continue;
+
+      auto it = std::find_if(generationsQ.begin(), generationsQ.end(),
+                             [nextIndex](const Influences &influence) {
+                               return influence.index == nextIndex;
+                             });
+
+      // if the next index already exists in the queue
+      if (it != generationsQ.end()) {
+        // I must check if the nextIndex in queue generation is larger than
+        // currentGen and if so, we can mark the influenced.index as influencing
+        // index of nextIndex
+        if ((*it).generation > influenced.generation) {
+          (*it).influencedBy[influenced.index] = pos;
+        }
       } else {
-        // It means the states has changed but we can choose freely
-        // from all of them
-        auto pick = RandomElement(cell.states.begin(), cell.states.end());
-        cell.states = uset<TileType>{*pick};
-        cell.collapsed = true;
-      }
-
-      for (const auto &[_, neighborIndex] : neighbors) {
-        if (neighborIndex != -1 && !grid[neighborIndex].collapsed) {
-          propagationQ.push(neighborIndex);
-        }
+        // If its not in the deque, we simply add as influencing index and
+        // enqueu the nextIndex
+        umap<size_t, Position> influencedBy = {{influenced.index, pos}};
+        Influences influencedNeighbor(influenced.generation + 1, nextIndex,
+                                      influencedBy);
+        generationsQ.push_back(influencedNeighbor);
       }
     }
   }
+}
+
+bool AllCollapsed(vector<GridCell> &grid) {
+  return std::all_of(grid.begin(), grid.end(),
+                     [](const GridCell &cell) { return cell.collapsed; });
 }
 
 void Draw(sf::RenderWindow &window, vector<GridCell> &grid) {
-  Propagate(grid);
   for (int j = 0; j < UNITS; j++) {
     for (int i = 0; i < UNITS; i++) {
       GridCell &cell = grid[i + j * UNITS];
       if (cell.collapsed) {
         // Only one option state
         // std::cout << i << ", " << j << std::endl;
-        TileType type = *cell.states.begin();
+        TileType type = cell.states.collapsedState;
         cell.tile = std::make_unique<Tile>(type, i, j);
         cell.tile->SetPosition(i * PIXEL_SIZE * SCALE, j * PIXEL_SIZE * SCALE);
         cell.tile->sprite.setScale(SCALE, SCALE);
@@ -194,40 +323,84 @@ void Draw(sf::RenderWindow &window, vector<GridCell> &grid) {
   }
 }
 
+void PrintGridStates(const vector<GridCell> &grid) {
+  for (size_t j = 0; j < UNITS; ++j) {
+    for (size_t i = 0; i < UNITS; ++i) {
+      const GridCell &cell = grid[i + j * UNITS];
+      if (cell.collapsed) {
+        // If the cell is collapsed, show its state
+        if (cell.states.Get().size() != 1) {
+          size_t stateSize = cell.states.Get().size();
+          std::cerr << "Problem! Collapsed cell have " << stateSize
+                    << " states!" << std::endl;
+        }
+        TileType collapsedState = cell.states.collapsedState;
+        std::cout << std::setw(3) << "(c) " << collapsedState << " ";
+      } else {
+        // If the cell is not collapsed, show the number of states
+        std::cout << std::setw(3) << "(u) " << cell.states.Get().size() << " ";
+      }
+    }
+    std::cout << "\n";
+  }
+  std::cout << std::string(50, '-') << "\n"; // Separator for better readability
+}
+
 int main() {
   srand(time(nullptr));
   vector<GridCell> grid(UNITS * UNITS);
   sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "WFC");
   window.setVerticalSyncEnabled(true);
 
-  // Simple check to see if we lower the number of states of two cells,
-  // the first tile is always draw on either one of them
-  // grid[0].states = {Wall_Void, Floor};
-  // grid[2].states = {Wall_Void, Floor};
-
   int counter = 0;
   for (auto &cell : grid) {
     cell.index = counter;
+    cell.states.Initialize();
     counter++;
   }
 
-  float wait = 2.0f;
+  bool cerror = false;
 
-  HandleGrid(grid);
-  sf::Time time = sf::seconds(wait);
+  while (!AllCollapsed(grid)) {
+    // Attempt to handle the grid and collapse a cell
+    int collapsedIndex = HandleGrid(grid, cerror);
+
+    // If no valid cell could be collapsed
+    if (cerror) {
+      grid[collapsedIndex].states.Insert(TileType::Wall_Void, 1.0);
+      grid[collapsedIndex].states.Collapse();
+      grid[collapsedIndex].collapsed = true;
+      cerror = false;
+      continue;
+    }
+
+    // Propagate changes from the collapsed index
+    Propagate(grid, collapsedIndex);
+
+    // Debug: Print the current grid states after propagation
+    // PrintGridStates(grid);
+  }
+
+  std::cout << "all collapsed" << std::endl;
+
+  bool redraw = true;
 
   while (window.isOpen()) {
     sf::Event event;
-    if (window.pollEvent(event)) {
+    while (window.pollEvent(event)) {
       if (event.type == sf::Event::Closed) {
         window.close();
       }
     }
 
-    window.clear();
-    Draw(window, grid);
-    sf::sleep(time);
+    if (redraw) {
+      window.clear();
+      Draw(window, grid);
+      redraw = false;
+    }
     window.display();
+
+    sf::sleep(sf::milliseconds(16));
   }
   return EXIT_SUCCESS;
 }
