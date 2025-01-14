@@ -118,34 +118,7 @@ struct Influences {
   Influences(size_t index) : index(index) {}
   Influences(unsigned int gen, size_t index, umap<size_t, Position> infl)
       : generation(gen), index(index), influencedBy(infl) {}
-
-  Position GetOppositePosition(size_t influencingIndex) {
-    if (influencedBy.find(influencingIndex) == influencedBy.end()) {
-      return Position::Null;
-    }
-
-    switch (influencedBy.at(influencingIndex)) {
-    case Position::Top:
-      return Position::Bottom;
-    case Position::Bottom:
-      return Position::Top;
-    case Position::Left:
-      return Position::Right;
-    case Position::Right:
-      return Position::Left;
-    case Position::TopRight:
-      return Position::BottomLeft;
-    case Position::TopLeft:
-      return Position::BottomRight;
-    case Position::BottomRight:
-      return Position::TopLeft;
-    case Position::BottomLeft:
-      return Position::TopRight;
-    default:
-      return Position::Null;
-    }
-  }
-};
+  };
 
 void Propagate(vector<GridCell> &grid, size_t collapsedIndex) {
   std::deque<Influences> generationsQ;
