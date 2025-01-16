@@ -12,7 +12,7 @@ Tile::Tile(const int &x, const int &y) : x(x), y(y) {
 }
 
 void Tile::AddNeighbor(Direction direction, Tile tile) {
-  _neighborTiles[direction] = tile;
+  _neighborTiles.emplace(direction, tile);
 }
 
 Tile Tile::GetNeighbor(Direction direction) const {
@@ -48,9 +48,46 @@ void Tile::Collapse() {
 // Must implement this
 bool Tile::Constrain(const uset<TileType> &neighborPossibilities,
                      Direction direction) {
+  if (_entropy <= 0) 
+    return false;
+
   bool reduced = false;
+ 
+  uset<TileType> connectors;
+  for (const TileType &neighborPossibility : neighborPossibilities) {
+    connectors.insert(TILE_RULES.at(neighborPossibility).at(direction));
+  }
+
+  Direction opposite;
+  switch (direction) {
+    case Direction::Top:
+    opposite = Direction::Down;
+    break;
+    case Direction::Down:
+    opposite = Direction::Top;
+    break;
+    case Direction::Left:
+    opposite = Direction::Right;
+    break;
+    case Direction::Right:
+    opposite = Direction::Left;
+    break;
+  }
+
+  const uset<TileType> possibilitiesCopy = _possibilities; 
+  for (const TileType& possibility : possibilitiesCopy) {
+    TileType oppositeTile = TILE_RULES.at(possibility).at(direction);
+    if (connectors.find(oppositeTile) == connectors.end()) {
+      _possibilities.erase(possibility);
+      reduced = true;
+    }
+  }
+
+  _entropy = _possibilities.size();
+
   return reduced;
 }
+
 /* PRIVATE METHODS */
 
 TileType Tile::GetRandomChoice(const vector<unsigned int> &weights) {
