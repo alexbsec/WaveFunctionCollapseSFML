@@ -1,22 +1,39 @@
 #include "include/renderer.hpp"
 #include "include/config.hpp"
-#include <stdexcept>
+#include <SFML/System/Sleep.hpp>
+#include <algorithm>
 
-Renderer::Renderer(World world)
-  : _world(world) {
-  if (!_texture.loadFromFile(SPRITESHEET_PATH)) {
-    throw std::runtime_error("Renderer constructor: cannot load spritesheet");
-  }
+Renderer::Renderer(std::unique_ptr<World> world) : _world(std::move(world)) {
+  _allRendered = false;
+}
 
-  _sprite.setTexture(_texture);
+void Renderer::Update(sf::Time deltaTime) {
+  int got = _world->WaveFunctionCollapse(); 
 }
 
 void Renderer::Draw(sf::RenderWindow &window) {
-  window.draw(_sprite);
+  vector<vector<std::shared_ptr<Tile>>> tiles = _world->GetAllTiles();
+  size_t sizeY = tiles.size();
+  size_t sizeX = tiles[0].size();
+  for (size_t y = 0; y < sizeY; y++) {
+    for (size_t x = 0; x < sizeX; x++) {
+      if (tiles[y][x]->GetSprite().getTexture() == nullptr)
+        continue;
+
+      window.draw(tiles[y][x]->GetSprite());
+    }
+  }
 }
 
-void Renderer::Update() {}
 
-World Renderer::GetWorld() const {
-  return _world;
+bool Renderer::IsAllRendered() {
+  vector<vector<std::shared_ptr<Tile>>> tiles = _world->GetAllTiles();
+  return std::all_of(tiles.begin(), tiles.end(),
+                     [](const vector<std::shared_ptr<Tile>> &inner) {
+                       return std::all_of(
+                           inner.begin(), inner.end(),
+                           [](const std::shared_ptr<Tile> &tile) {
+                             return tile->GetEntropy() == 0;
+                           });
+                     });
 }

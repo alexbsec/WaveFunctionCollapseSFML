@@ -8,15 +8,16 @@
 
 class Renderer {
 public:
-  explicit Renderer(World world);
+  explicit Renderer(std::unique_ptr<World> world);
   void Draw(sf::RenderWindow &window);
-  void Update();
-  World GetWorld() const;
+  void Update(sf::Time deltaTime);
 
 private:
-  sf::Sprite _sprite;
+  bool IsAllRendered();
+  umap<TileType, sf::Sprite> _sprites;
   sf::Texture _texture;
-  World _world;
+  std::unique_ptr<World> _world;
+  bool _allRendered;
 };
 
 

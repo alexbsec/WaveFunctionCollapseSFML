@@ -1,5 +1,7 @@
 #include "include/tiles.hpp"
 #include "include/config.hpp"
+#include <SFML/Graphics/Rect.hpp>
+#include <array>
 #include <random>
 #include <stdexcept>
 
@@ -11,11 +13,11 @@ Tile::Tile(const int &x, const int &y) : x(x), y(y) {
   _entropy = _possibilities.size();
 }
 
-void Tile::AddNeighbor(Direction direction, Tile tile) {
+void Tile::AddNeighbor(Direction direction, std::shared_ptr<Tile> tile) {
   _neighborTiles.emplace(direction, tile);
 }
 
-Tile &Tile::GetNeighbor(Direction direction) {
+std::shared_ptr<Tile> Tile::GetNeighbor(Direction direction) {
   return _neighborTiles.at(direction);
 }
 
@@ -41,18 +43,24 @@ void Tile::Collapse() {
   }
 
   TileType chosenType = GetRandomChoice(weights);
-  _possibilities = uset<TileType>(chosenType);
+  _possibilities = {chosenType};
   _entropy = 0;
+  std::array<int, 2> coordinates = TILE_SPRITESHEET_POSITION.at(chosenType);
+  _texture.loadFromFile(
+      SPRITESHEET_PATH,
+      sf::IntRect(coordinates[0], coordinates[1], TILE_SIZE, TILE_SIZE));
+  _sprite.setTexture(_texture);
+  _sprite.setPosition(x, y);
 }
 
 // Must implement this
 bool Tile::Constrain(const uset<TileType> &neighborPossibilities,
                      Direction direction) {
-  if (_entropy <= 0) 
+  if (_entropy == 0)
     return false;
 
   bool reduced = false;
- 
+
   uset<TileType> connectors;
   for (const TileType &neighborPossibility : neighborPossibilities) {
     connectors.insert(TILE_RULES.at(neighborPossibility).at(direction));
@@ -60,26 +68,31 @@ bool Tile::Constrain(const uset<TileType> &neighborPossibilities,
 
   Direction opposite;
   switch (direction) {
-    case Direction::Top:
+  case Direction::Top:
     opposite = Direction::Down;
     break;
-    case Direction::Down:
+  case Direction::Down:
     opposite = Direction::Top;
     break;
-    case Direction::Left:
+  case Direction::Left:
     opposite = Direction::Right;
     break;
-    case Direction::Right:
+  case Direction::Right:
     opposite = Direction::Left;
     break;
   }
 
-  const uset<TileType> possibilitiesCopy = _possibilities; 
-  for (const TileType& possibility : possibilitiesCopy) {
+  const uset<TileType> possibilitiesCopy = _possibilities;
+  for (const TileType &possibility : possibilitiesCopy) {
     TileType oppositeTile = TILE_RULES.at(possibility).at(opposite);
     if (connectors.find(oppositeTile) == connectors.end()) {
+      DEBUG("[DISCARDED] Possibility " + GetTypeName(possibility) +
+            " discarded for OPPOSITE direction " + GetDirectionName(opposite));
       _possibilities.erase(possibility);
       reduced = true;
+    } else {
+      DEBUG("[CONSIDERED] Found valid possibility " + GetTypeName(possibility) +
+            " at OPPOSITE direction " + GetDirectionName(opposite));
     }
   }
 
@@ -88,31 +101,23 @@ bool Tile::Constrain(const uset<TileType> &neighborPossibilities,
   return reduced;
 }
 
+sf::Sprite Tile::GetSprite() const { return _sprite; }
+
 /* PRIVATE METHODS */
 
-TileType Tile::GetRandomChoice(const vector<unsigned int> &weights) {
+TileType Tile::GetRandomChoice(const std::vector<unsigned int> &weights) {
+  // Validate input sizes
   if (_possibilities.size() != weights.size()) {
     throw std::invalid_argument(
         "GetRandomChoice: size of possibilities and weights must be the same");
   }
 
-  umap<TileType, unsigned int> tileWeights;
-  auto it = _possibilities.begin();
-  for (size_t i = 0; i < tileWeights.size(); i++) {
-    tileWeights[*it] = weights[i];
-  }
-
-  vector<TileType> tileVec;
-  vector<unsigned int> weightVec;
-
-  for (const auto &[tileType, weight] : tileWeights) {
-    tileVec.push_back(tileType);
-    weightVec.push_back(weight);
-  }
-
+  // Use std::discrete_distribution to pick one element directly
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::discrete_distribution<> dist(weightVec.begin(), weightVec.end());
+  std::discrete_distribution<> dist(weights.begin(), weights.end());
 
-  return tileVec[dist(gen)];
+  auto it = _possibilities.begin();
+  std::advance(it, dist(gen)); // Move iterator to the chosen index
+  return *it;
 }
