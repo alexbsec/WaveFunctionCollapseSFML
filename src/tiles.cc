@@ -15,7 +15,7 @@ void Tile::AddNeighbor(Direction direction, Tile tile) {
   _neighborTiles.emplace(direction, tile);
 }
 
-Tile Tile::GetNeighbor(Direction direction) const {
+Tile &Tile::GetNeighbor(Direction direction) {
   return _neighborTiles.at(direction);
 }
 
@@ -76,7 +76,7 @@ bool Tile::Constrain(const uset<TileType> &neighborPossibilities,
 
   const uset<TileType> possibilitiesCopy = _possibilities; 
   for (const TileType& possibility : possibilitiesCopy) {
-    TileType oppositeTile = TILE_RULES.at(possibility).at(direction);
+    TileType oppositeTile = TILE_RULES.at(possibility).at(opposite);
     if (connectors.find(oppositeTile) == connectors.end()) {
       _possibilities.erase(possibility);
       reduced = true;

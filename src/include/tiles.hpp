@@ -1,8 +1,8 @@
 #ifndef _WFC_TILES_HPP
 #define _WFC_TILES_HPP
 
-#include <unordered_set>
 #include "config.hpp"
+#include <unordered_set>
 
 template <typename T> using uset = std::unordered_set<T>;
 
@@ -10,12 +10,13 @@ class Tile {
 public:
   Tile(const int &x, const int &y);
   void AddNeighbor(Direction direction, Tile tile);
-  Tile GetNeighbor(Direction direction) const;
+  Tile &GetNeighbor(Direction direction);
   vector<Direction> GetDirections() const;
   uset<TileType> GetPossibilities() const;
   size_t GetEntropy() const;
   void Collapse();
-  bool Constrain(const uset<TileType> &neighborPossibilities, Direction direction);
+  bool Constrain(const uset<TileType> &neighborPossibilities,
+                 Direction direction);
 
   int x;
   int y;
