@@ -11,13 +11,20 @@ public:
   Tile(const int &x, const int &y);
   void AddNeighbor(Direction direction, Tile tile);
   Tile GetNeighbor(Direction direction) const;
+  vector<Direction> GetDirections() const;
+  uset<TileType> GetPossibilities() const;
+  size_t GetEntropy() const;
+  void Collapse();
+  bool Constrain(const uset<TileType> &neighborPossibilities, Direction direction);
 
   int x;
   int y;
-  uset<TileType> possibilities;
-  size_t entropy;
 
 private:
+  TileType GetRandomChoice(const vector<unsigned int> &weights);
+
+  size_t _entropy;
+  uset<TileType> _possibilities;
   umap<Direction, Tile> _neighborTiles;
 };
 

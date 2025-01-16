@@ -75,6 +75,10 @@ enum TileType {
   Floor_Wildcard,
 };
 
+const umap<TileType, unsigned int> TILE_WEIGHTS = {
+  {Floor_MiddleMiddle, 16},
+};
+
 const umap<TileType, std::array<int, 2>> TILE_SPRITESHEET_POSITION = {
 
 };
